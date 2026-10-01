@@ -7,6 +7,8 @@
 
 所有工具都是只读的：不改 wiki 内容、不需要登录、不需要任何密钥。
 
+仓库：<https://github.com/ABccgh/dsh-ck3-wiki>（MIT）
+
 ## 9 个工具
 
 ### 发现（3）
@@ -172,4 +174,4 @@ $env:DSH_CK3WIKI_LIVE=1; node --test test/live.test.js
 
 ## 许可
 
-MIT
+MIT —— 见 [LICENSE](./LICENSE)。仓库：<https://github.com/ABccgh/dsh-ck3-wiki>
