@@ -122,6 +122,9 @@ TLS 会被自签根证书接管：Windows 信任它，Node 自带 CA 包不信�
 - **零依赖**：只 import `node:*` 和自己的模块。测试目录同样不依赖任何框架（`node --test`）。
   插件是 `link:` 安装的 profile bundle，**不能** import `@deepseek-ai/*`（会被解析到 bundle 之外的
   作用域，导致 `ERR_MODULE_NOT_FOUND` 让整个插件加载失败），所以 `defineTool` 是本地实现。
+- **`apply` 不要有返回值**：Cordis 会把插件函数的返回值当 effect 收集，Promise 解析出数组/字符串这类
+  非函数值时会抛 `TypeError: Invalid effect`，整条插件激活失败（本项目实测踩过；`test/plugin.test.js`
+  里有一条回归用例盯着它）。已注册的工具名只用于打日志。
 - **分层**：`mediawiki.js`（纯函数：URL 构造 + 响应映射）→ `html-text.js`（纯函数：HTML 归约）
   → `http.js`（出网）→ `tools/*.js`（编排）。前三层都可以离线单测，不需要网络。
 - **省 token**：整页先看目录再分节读；`maxChars` 按行边界截断并附「怎么继续读」的提示。
@@ -134,7 +137,7 @@ TLS 会被自签根证书接管：Windows 信任它，Node 自带 CA 包不信�
 ## 测试
 
 ```powershell
-# 离线（54 个用例：URL 构造、响应映射、HTML 归约、工具注册与错误分支）
+# 离线（55 个用例：URL 构造、响应映射、HTML 归约、工具注册与错误分支）
 node --test "test/*.test.js"
 
 # 联网冒烟（11 个用例，逐工具打真站）
