@@ -1,0 +1,30 @@
+{
+  "name": "@local/ck3wiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Crusader Kings III Wiki (MediaWiki) tools for DeepSeek Harness: read-only search and page access",
+  "license": "MIT",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/**/*.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "meta": {
+    "title": "CK3 Wiki",
+    "description": "把 CK3 官方 Wiki（ck3.paradoxwikis.com，MediaWiki）接进来：9 个只读 ck3wiki_* 工具，覆盖全文检索、页面正文、目录、分类、链接与最近改动。"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:live": "node --test \"test/live.test.js\""
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

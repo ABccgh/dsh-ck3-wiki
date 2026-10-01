@@ -1,0 +1,27 @@
+# dsh-ck3-wiki — 把 CK3 官方 Wiki 接进 DeepSeek Harness
+#
+# 本文件既是 bundle 的 patch 层，也是这份插件的**运行时配置**。
+# 真正被读取的是**安装副本**里的这一份（%USERPROFILE%\dsh-bundles\ck3wiki\cordis.patch.yml），
+# 不是仓库里的这份——改配置要改副本（或用下面的同步命令再推一次）。
+#
+# 改完需要**手动重载**（插件页把 ck3wiki 关开一次）；改代码则必须重启 DSH：
+# Host 进程会缓存已加载的 ESM 模块，插件页开关与 HMR 只重装配置，不会重新读代码。
+#
+# 本站不需要任何密钥、不需要登录：ck3.paradoxwikis.com 公开可读。
+#
+# userAgent 是最关键的一项：该站在 Fastly 之后，伪装浏览器的 UA 会被反爬挑战页拦下
+# （返回 HTML 而不是 JSON），而带联系 URL 的机器人 UA 可以正常访问。
+# 想改成别的写法时，请保留「名字 + 联系地址」的结构，不要伪装成浏览器。
+- insert:
+    - id: ck3wiki
+      name: '@local/ck3wiki'
+      config:
+        wikiBaseUrl: https://ck3.paradoxwikis.com
+        apiPath: /api.php
+        userAgent: 'dsh-ck3wiki/0.1 (+https://github.com/ABccgh/dsh-ck3-wiki; read-only)'
+        requestTimeoutMs: 15000
+        maxChars: 20000
+        maxListedItems: 100
+        cacheTtlMs: 60000
+        trustSystemCa: auto
+        webFallback: true
