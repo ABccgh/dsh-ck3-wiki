@@ -1,6 +1,6 @@
 {
   "name": "@local/ck3wiki",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "Crusader Kings III Wiki (MediaWiki) tools for DeepSeek Harness: read-only search and page access",

@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decodeEntities, extractParserOutput, removeElements, stripTags, toText, truncateText } from '../lib/html-text.js';
+import { DEFAULT_NOISE_PATTERNS, cleanSnippet, decodeEntities, dropNoiseLines, extractParserOutput, removeElements, stripRawTextBlocks, stripTags, toText, truncateText } from '../lib/html-text.js';
 import { PAGE_TEXT } from './fixtures/fixtures.js';
 
 test('decodeEntities 处理命名、十进制与十六进制实体', () => {
@@ -21,6 +21,147 @@ test('decodeEntities 处理命名、十进制与十六进制实体', () => {
 test('stripTags 去标签、解实体、压空白', () => {
   assert.equal(stripTags('Seize <span class="searchmatch">De</span>  Jure\n\ntitles'), 'Seize De Jure titles');
   assert.equal(stripTags('a &amp; b'), 'a & b');
+});
+
+test('stripTags 删掉 script/style 的内容与注释', () => {
+  // 删块时用空格替换（不是空串）：英文片段里 'a<script>…</script>b' 不能粘成 'ab'。
+  const out = stripTags('前<script>(window.RLQ = window.RLQ || []).push([[&quot;jquery&quot;]])</script>后');
+  assert.ok(!out.includes('RLQ'), `脚本体必须删掉：${out}`);
+  assert.ok(!out.includes('jquery'), out);
+  assert.ok(out.includes('前') && out.includes('后'), out);
+  assert.equal(stripTags('<style>.a{color:red}</style>正文'), '正文');
+  assert.equal(stripTags('<!-- 注释 -->正文'), '正文');
+  assert.equal(stripTags('a<script>x</script>b'), 'a b', '英文不能粘词');
+});
+
+test('stripRawTextBlocks 摘掉原始文本元素的内容', () => {
+  const out = stripRawTextBlocks('<p>前</p><script>var a = 1;</script><style>.a{color:red}</style><p>后</p>');
+  assert.ok(!out.includes('var a = 1'), out);
+  assert.ok(!out.includes('color:red'), out);
+  assert.ok(out.includes('<p>前</p>') && out.includes('<p>后</p>'), out);
+});
+
+test('回归：脚本里含 HTML 字符串时不吞正文（PRTS 实测同源缺陷：一次吃掉 92.9%）', () => {
+  const html = '<div class="mw-parser-output">'
+    + '<script>var tpl = \'<div>\' + \'</div>\' + \'<span class="y">\';</script>'
+    + '<h2>Uses</h2><p>A casus belli is a justification for war.</p></div>';
+  const { text } = toText(html, { maxChars: 20_000 });
+  assert.ok(text.includes('## Uses'), `脚本不该吞掉正文：${text}`);
+  assert.ok(text.includes('casus belli'), text);
+  assert.ok(!text.includes('var tpl'), text);
+});
+
+test('回归：样式里含 </div> 字符串时同样不吞正文', () => {
+  const html = '<div class="mw-parser-output"><style>.x::after{content:"</div>"}</style>'
+    + '<h2>Costs</h2><p>100 gold</p></div>';
+  const { text } = toText(html, { maxChars: 20_000 });
+  assert.ok(text.includes('## Costs'), text);
+  assert.ok(text.includes('100 gold'), text);
+});
+
+test('dropClasses 是替换语义，extraDropClasses 是追加语义', () => {
+  const html = '<div class="mw-parser-output"><div class="navbox">导航</div><div class="mine">自定义</div><p>正文</p></div>';
+
+  const byDefault = toText(html, { maxChars: 20_000 });
+  assert.ok(!byDefault.text.includes('导航'), byDefault.text);
+  assert.ok(byDefault.text.includes('自定义'), '默认表里没有 mine，应当保留');
+
+  const replaced = toText(html, { maxChars: 20_000, dropClasses: ['mine'] });
+  assert.ok(!replaced.text.includes('自定义'), replaced.text);
+  assert.ok(replaced.text.includes('导航'), '替换语义下默认项不再生效');
+
+  const extended = toText(html, { maxChars: 20_000, extraDropClasses: ['mine'] });
+  assert.ok(!extended.text.includes('自定义'), extended.text);
+  assert.ok(!extended.text.includes('导航'), '追加语义下默认项仍然生效');
+
+  const off = toText(html, { maxChars: 20_000, dropClasses: [] });
+  assert.ok(off.text.includes('导航') && off.text.includes('自定义'), '空表 = 不做 class 过滤');
+});
+
+test('class 表的容错：类型写错回退默认，非法项自然不命中', () => {
+  const html = '<div class="mw-parser-output"><div class="navbox">导航</div><p>正文</p></div>';
+  const fallback = toText(html, { maxChars: 20_000, dropClasses: 'navbox' });
+  assert.ok(!fallback.text.includes('导航'), '类型写错应回退默认表');
+
+  const mixed = toText(html, { maxChars: 20_000, dropClasses: ['', 42, 'navbox'] });
+  assert.ok(!mixed.text.includes('导航'), '合法项照常生效');
+
+  const junkOnly = toText(html, { maxChars: 20_000, dropClasses: ['', 42] });
+  assert.ok(junkOnly.text.includes('导航'), '全是非法项时等于空表（不会误伤）');
+});
+
+test('视频嵌入：只丢装饰层，图注必须保留', () => {
+  const { text } = toText(PAGE_TEXT.parse.text, { maxChars: 20_000 });
+  assert.ok(!text.includes('Load video'), `装饰层该被丢掉：\n${text.slice(0, 400)}`);
+  assert.ok(!text.includes('might collect personal data'), text.slice(0, 400));
+  assert.ok(!text.includes('Privacy Policy'), text.slice(0, 400));
+  assert.ok(text.includes('CK3 Modding #1'), 'figcaption 是真正的视频标题，不能被丢');
+});
+
+test('dropNoiseLines：锚定整行、空数组关闭、非法正则忽略', () => {
+  const text = ['YouTube', 'YouTube 是视频站', 'Load video', '正片开始'].join('\n');
+  const dropped = dropNoiseLines(text, DEFAULT_NOISE_PATTERNS);
+  assert.ok(!dropped.split('\n').includes('YouTube'), dropped);
+  assert.ok(dropped.includes('YouTube 是视频站'), '锚定整行，不该误伤「包含」的情况');
+  assert.ok(!dropped.includes('Load video'), dropped);
+  assert.ok(dropped.includes('正片开始'), dropped);
+
+  assert.equal(dropNoiseLines(text, []), text, '空数组 = 关闭行级过滤');
+  assert.equal(dropNoiseLines('YouTube', ['([', '^YouTube$']), '', '非法项忽略，合法项照常生效');
+});
+
+test('toText：裸行噪声被丢掉，且不留下连续空行', () => {
+  const html = '<div class="mw-parser-output"><h2>Uses</h2><p>YouTube</p><p>正文</p><h2>Costs</h2><p>100</p></div>';
+  const { text: filtered } = toText(html, { maxChars: 20_000 });
+  assert.ok(!filtered.split('\n').includes('YouTube'), `裸行应被丢掉：\n${filtered}`);
+  assert.ok(filtered.includes('正文') && filtered.includes('## Uses') && filtered.includes('## Costs'), filtered);
+  assert.ok(!/\n{3,}/.test(filtered), `丢行后不该留下连续空行：\n${filtered}`);
+
+  const { text: unfiltered } = toText(html, { maxChars: 20_000, noisePatterns: [] });
+  assert.ok(unfiltered.split('\n').includes('YouTube'), '关掉行级过滤后裸行仍在');
+});
+
+test('锚定整行的行级噪声不会误伤同名标题', () => {
+  const html = '<div class="mw-parser-output"><h2>YouTube</h2><p>正文</p></div>';
+  const { text } = toText(html, { maxChars: 20_000 });
+  assert.ok(text.includes('## YouTube'), `标题是「## YouTube」，不该被 ^YouTube$ 命中：\n${text}`);
+  assert.ok(text.includes('正文'), text);
+});
+
+test('cleanSnippet 整句丢掉站点样板（cookie 提示 / 版本横幅）', () => {
+  const cookie = 'collect personal data. Privacy Policy ContinueDismiss CK3 Modding #1 -Brief introduction to modding.';
+  const cleaned = cleanSnippet(cookie);
+  for (const noise of ['collect personal data', 'Privacy Policy', 'ContinueDismiss']) {
+    assert.ok(!cleaned.includes(noise), `「${noise}」应被丢掉：${cleaned}`);
+  }
+
+  const banner = 'Please help with verifying or updating older sections of this article. A Duchy is a title, granted by a liege.';
+  assert.equal(cleanSnippet(banner), 'A Duchy is a title, granted by a liege.');
+});
+
+test('cleanSnippet 只按词删行内噪声，句子其余部分照旧', () => {
+  const raw = 'having the Error creating thumbnail: File missing Inbred trait, traits that are considered virtues.';
+  const out = cleanSnippet(raw);
+  assert.ok(!out.includes('Error creating thumbnail'), out);
+  assert.ok(out.includes('having the Inbred trait, traits that are considered virtues.'), out);
+
+  // 片段有长度上限，报错文字会被截成 `Error creating`（实测），短词表得兜住它。
+  assert.equal(cleanSnippet('1.6 • 1.6.1 • 1.6.1.2 Error creating'), '1.6 • 1.6.1 • 1.6.1.2');
+
+  // 页脚导航整串删掉，别把前面的正文一起带走。
+  const footer = 'Way of Kings Modding Meta Modding • Patches • Downloadable content • Developer diaries • Achievements • Jargon';
+  assert.equal(cleanSnippet(footer), 'Way of Kings Modding');
+});
+
+test('cleanSnippet 不会把 URL 里的点当句号切碎', () => {
+  const raw = 'analyzing_how_to_get_hunter_traits/ https://www.reddit.com/r/CrusaderKings/comments/vtfw26/analyzing_how_to_get_reveler_traits/ Mechanics';
+  assert.equal(cleanSnippet(raw), raw);
+});
+
+test('cleanSnippet 词表可覆盖，空输入安全', () => {
+  assert.equal(cleanSnippet('keep me', { sentences: [], phrases: [] }), 'keep me');
+  assert.equal(cleanSnippet('', {}), '');
+  assert.equal(cleanSnippet(undefined, {}), '');
 });
 
 test('extractParserOutput 只取正文容器', () => {

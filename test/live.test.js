@@ -11,6 +11,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { apply } from '../lib/index.js';
+import { pageUrl } from '../lib/mediawiki.js';
+
+const BASE = 'https://ck3.paradoxwikis.com';
 
 const LIVE = process.env.DSH_CK3WIKI_LIVE === '1';
 
@@ -52,6 +55,38 @@ async function call(tools, toolName, args = {}) {
   const value = await definition.execute(args, { signal: AbortSignal.timeout(60_000) });
   return String(value.text);
 }
+
+test('live：视频装饰被清掉，但图注保留（Modding）', { skip: !LIVE }, async () => {
+  const tools = await boot();
+  const text = await call(tools, 'ck3wiki_page', { title: 'Modding' });
+  assert.ok(!text.includes('Load video'), `装饰层该被丢掉：\n${text.slice(0, 400)}`);
+  assert.ok(!text.includes('might collect personal data'), text.slice(0, 400));
+  assert.ok(text.includes('Mr Samuel Streamer'), '图注（视频标题）必须保留');
+});
+
+test('live：多视频页也不再有装饰（Downloadable content）', { skip: !LIVE }, async () => {
+  const tools = await boot();
+  const text = await call(tools, 'ck3wiki_page', { title: 'Downloadable content' });
+  assert.ok(!text.includes('might collect personal data'), text.slice(0, 400));
+  assert.ok(!text.includes('Load video'), text.slice(0, 400));
+  assert.ok(text.length > 1000, text.slice(0, 200));
+});
+
+test('live：子页标题的 URL 与站点 fullurl 一致', { skip: !LIVE }, async () => {
+  const tools = await boot();
+  const title = 'Template:0/doc';
+  const expected = pageUrl(BASE, title);
+
+  const info = await call(tools, 'ck3wiki_page_info', { title });
+  const urlLine = info.split('\n').find((line) => line.startsWith('URL：'));
+  assert.ok(urlLine, `page_info 应给出 URL 行：\n${info}`);
+  assert.equal(urlLine.slice('URL：'.length).trim(), expected, 'page_info 的 URL 行应与我们拼的一致');
+
+  const page = await call(tools, 'ck3wiki_page', { title, maxChars: 300 });
+  const sourceLine = page.split('\n').find((line) => line.startsWith('来源：'));
+  assert.ok(sourceLine, `页面应给出来源行：\n${page}`);
+  assert.ok(sourceLine.includes(expected), `来源行应含规范 URL：${sourceLine}`);
+});
 
 test('live：ck3wiki_status 能连通并报出站点信息', { skip: !LIVE }, async () => {
   const tools = await boot();
