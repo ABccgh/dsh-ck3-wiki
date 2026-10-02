@@ -89,6 +89,22 @@ test('pageUrl 用下划线代替空格并编码', () => {
   assert.equal(pageUrl(BASE, 'Casus Belli (innovation)'), 'https://ck3.paradoxwikis.com/Casus_Belli_(innovation)');
 });
 
+test('pageUrl 与站点 fullurl 逐字一致（子页与命名空间标题）', () => {
+  // 期望值取自站点自己的 `prop=info&inprop=url`（2026-10-02 实测），不是我们的约定。
+  assert.equal(pageUrl(BASE, 'Template:0/doc'), 'https://ck3.paradoxwikis.com/Template:0/doc');
+  assert.equal(pageUrl(BASE, 'Module:Arguments/doc'), 'https://ck3.paradoxwikis.com/Module:Arguments/doc');
+  assert.equal(pageUrl(BASE, 'Template:Add/Strategy'), 'https://ck3.paradoxwikis.com/Template:Add/Strategy');
+  assert.equal(pageUrl(BASE, 'CK3 Wiki:Style'), 'https://ck3.paradoxwikis.com/CK3_Wiki:Style');
+  assert.equal(pageUrl(BASE, 'Modding'), 'https://ck3.paradoxwikis.com/Modding');
+});
+
+test('pageUrl 的边界：空标题、子页里的空格、含 % 的标题', () => {
+  assert.equal(pageUrl(BASE, ''), 'https://ck3.paradoxwikis.com/');
+  assert.equal(pageUrl(BASE, 'Modding/console commands'), 'https://ck3.paradoxwikis.com/Modding/console_commands');
+  assert.equal(pageUrl(BASE, 'Template:50%'), 'https://ck3.paradoxwikis.com/Template:50%25');
+  assert.equal(pageUrl(BASE, '  Modding  '), 'https://ck3.paradoxwikis.com/Modding');
+});
+
 test('categoryTitle 补前缀且不重复补', () => {
   assert.equal(categoryTitle('Modding'), 'Category:Modding');
   assert.equal(categoryTitle('category:Modding'), 'Category:Modding');
