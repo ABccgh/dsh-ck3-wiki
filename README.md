@@ -7,6 +7,8 @@
 
 所有工具都是只读的：不改 wiki 内容、不需要登录、不需要任何密钥。
 
+当前版本 **0.2.0**（2026-11）：与 DSH 0.2.2 对齐——新增 locale/图标显示元数据、按名字解析命名空间并把接口 `warnings` 如实带出、`page_info` 报真实最后修订、9 个工具统一 `fresh`、分页 `continue`、wikitext 取节、截断预算与按节措辞、`status` 精简/`verbose`、配置逐字段告警。
+
 仓库：<https://github.com/ABccgh/dsh-ck3-wiki>（MIT）
 
 ## 9 个工具
@@ -15,7 +17,7 @@
 
 | 工具 | 作用 |
 |---|---|
-| `ck3wiki_status` | 连通性与站点概况：站点名、MediaWiki 版本、接口地址、页面统计、当前 User-Agent、缓存与证书状态。**任何 wiki 工具报错时先调它。** |
+| `ck3wiki_status` | 连通性与站点概况：站点名、MediaWiki 版本、接口地址、页面统计、当前 User-Agent、webFallback、缓存与证书状态（`verbose: true` 才附带超时/maxChars/maxListedItems/cacheTtlMs 与累计缓存计数）。**任何 wiki 工具报错时先调它。** |
 | `ck3wiki_search` | 全文检索（CirrusSearch）：标题、pageid、字节数、最后编辑、命中片段。支持 `incategory:"Modding"`、`intitle:modding`、`prefix:Modding`、`insource:"de jure"`。 |
 | `ck3wiki_titles` | 按前缀猜标题（opensearch）：标题拼错或搜不到时先把名字对准，返回标题 + 规范 URL。 |
 
@@ -23,9 +25,9 @@
 
 | 工具 | 作用 |
 |---|---|
-| `ck3wiki_page` | 读正文。默认返回**可读文本**（表格降成 `\| 单元格 \|` 行，丢掉导航噪声）；`format="wikitext"` 返回原始源码；`section=N` 只读某一节。 |
+| `ck3wiki_page` | 读正文。默认返回**可读文本**（表格降成 `\| 单元格 \|` 行，丢掉导航噪声）；`format="wikitext"` 返回原始源码；`section=N` 只取某一节（`format` 为 `text` 或 `wikitext` 都生效）。 |
 | `ck3wiki_sections` | 章节目录（section 索引 + 层级 + 标题）。读长页面之前先调它。 |
-| `ck3wiki_page_info` | 元数据：pageid、命名空间、字节数、最后编辑（revid/时间/编辑者/摘要）、分类、是否重定向/消歧义页、规范 URL。 |
+| `ck3wiki_page_info` | 元数据：pageid、命名空间、字节数、最后编辑（时间/编辑者/摘要/revid，取自 `prop=revisions`，不是 `touched`）、分类、重定向来源与规范 URL。 |
 
 ### 导航（3）
 
@@ -34,6 +36,12 @@
 | `ck3wiki_links` | 出链（`direction="out"`）或反向链接（`direction="in"`）：从一页扩散到相关页，或看某模板被谁引用。 |
 | `ck3wiki_category` | 分类成员：`type` 可选 `page`（默认）/`subcat`/`file`/`all`。找「某类东西的全集」时最有用。 |
 | `ck3wiki_recent_changes` | 最近改动（默认 7 天）：新建/编辑、页面、编辑者、字节差、摘要。 |
+
+**公共参数**：所有工具都支持 `fresh: true`（绕过 TTL 缓存重取）；命名空间参数接受数字 id、名字
+或别名（插件先取 `siteinfo` 的 `namespaces|namespacealiases` 解析成数字 id，结果缓存 10 分钟），
+不认识的名字会报错并列出可用名字，`*` 表示全部；`ck3wiki_links` / `ck3wiki_category` /
+`ck3wiki_recent_changes` 支持 `continue` 翻页——输出末尾会回显「下一次 continue=…」，原样传回即可。
+每个工具都声明了 45 秒墙钟超时（`TOOL_TIMEOUT_MS`，只作卡死兜底；正常路径由单次请求超时与重试控制）。
 
 ## 安装
 
@@ -79,8 +87,8 @@
 | `userAgent` | `dsh-ck3wiki/0.1 (+https://github.com/ABccgh/dsh-ck3-wiki; read-only)` | **见下节**，不要改成浏览器 UA |
 | `requestTimeoutMs` | `15000` | 单次 HTTP 超时 |
 | `maxChars` | `20000` | 页面文本默认截断上限（单次调用最多可传 60000） |
-| `maxListedItems` | `100` | 列表类工具硬上限 |
-| `cacheTtlMs` | `60000` | 只读结果 TTL 缓存（含单飞去重），`0` 关闭；工具参数 `fresh: true` 可绕过 |
+| `maxListedItems` | `100` | 列表类工具（`titles`/`links`/`category`/`recent_changes`）的 `limit` 上限；配置缺失时各工具退回自己的原默认上限 |
+| `cacheTtlMs` | `60000` | 只读结果 TTL 缓存（含单飞去重），`0` 关闭；工具参数 `fresh: true` 可绕过。`recent_changes` 的 `rcstart`/`rcend` 按这个窗口取整，否则每次 URL 都不同、缓存永不命中 |
 | `trustSystemCa` | `auto` | `auto` / `always` / `never`，见下节 |
 | `webFallback` | `true` | 直连失败或被反爬挑战时，用 DSH 自己的 `web` 服务再取一次 |
 | `noisePatterns` | 见 `lib/html-text.js` | 行级噪声正则（**锚定整行**）；默认挡掉视频嵌入带出的 `Load video` / `YouTube` / 隐私提示。传 `[]` 关闭 |
@@ -133,12 +141,18 @@ TLS 会被自签根证书接管：Windows 信任它，Node 自带 CA 包不信�
 - **分层**：`mediawiki.js`（纯函数：URL 构造 + 响应映射）→ `html-text.js`（纯函数：HTML 归约）
   → `http.js`（出网）→ `tools/*.js`（编排）。前三层都可以离线单测，不需要网络。
 - **省 token**：整页先看目录再分节读；`maxChars` 按行边界截断并附「怎么继续读」的提示。
+  截断注记**计入 `maxChars` 预算**（返回总长不会超），并按调用范围写「本页 / 本节」。
   实测 `Traits` 页正文 12 万字符，直接整页返回既贵又没法读。
-- **不抛裸错**：页面不存在 → 给相近标题；`section` 越界 → 改列目录；命名空间/分类名写错 → 给检索建议。
+- **不抛裸错**：页面不存在 → 给相近标题；`section` 越界 → 改列目录；命名空间名字写错 → 报错并列出
+  可用名字；分类页/页面不存在 → 明确说「不存在」而不是伪装成「没有成员 / 没有链接」。
   接口自己报的错（`{error:{code,info}}`，例如 `srlimit` 超过匿名上限、非法 CirrusSearch 语法）
   在每条路径上都会**如实上报并附建议**，不会被当成「没有命中 / 没有成员」。
+  接口的 `warnings`（典型场景：命名空间写错、站点没按参数过滤）也会作为「警告：…」带出来。
+- **命名空间只认数字 id**：`srnamespace`/`plnamespace` 之类的参数写名字会被站点**静默忽略**，
+  查询退化成全部命名空间。插件取一次 `siteinfo` 把名字/别名解析成数字 id（缓存 10 分钟），
+  数字与 `*` 直接透传、不额外请求；解析不了的名字给可执行报错，不把名字原样发出去。
 - **标题原样打印**：MediaWiki 返回的标题本就带本地化命名空间前缀（`CK3 Wiki:Style`、`Template:X/doc`），
-  所以不再二次拼接——否则会拼出 `Project:CK3 Wiki:Style` 这种废标题。
+  所以检索/出链/分类/最近改动都不再二次拼接——否则会拼出 `Template:Template:X` 这种废标题。
 - **噪声按要求分两级、两级都可配置**：能靠 DOM 定点的就定点（视频嵌入丢的是 `embedvideo-consent` ——
   `Load video`/`YouTube`/隐私提示都在它里面，而 `<figcaption>` 的视频标题是它的**同级兄弟**，
   丢整块 `embedvideo` 会连标题一起丢，2026-10-02 实测对比过）；定不了的留 `noisePatterns`
@@ -155,13 +169,16 @@ TLS 会被自签根证书接管：Windows 信任它，Node 自带 CA 包不信�
 ## 测试
 
 ```powershell
-# 离线（83 个用例：URL 构造、响应映射、HTML 归约与分节、片段清洗、视频装饰与行级噪声、
-#        可配置 class 表、工具注册与错误分支、缓存与重试、脚本吞页回归）
+# 离线（118 个用例：URL 构造与 continue 游标、响应映射、命名空间解析、HTML 归约与截断预算、
+#        片段清洗与缩略图噪声、可配置 class 表、工具注册与错误分支、缓存/重试/配置告警）
 node --test "test/*.test.js"
 
 # 联网冒烟（14 个用例，逐工具打真站；含「视频装饰消失但图注保留」的回归锚点）
 $env:DSH_CK3WIKI_LIVE=1; node --test test/live.test.js
 ```
+
+> `test/` 只在仓库里：安装命令用 `/XD test` 把测试目录排除了，安装副本不含它。
+> 所以**在安装目录跑 `npm test` 会失败**（找不到 `test/*.test.js`）——要跑测试请回到仓库目录。
 
 `node` 用 DSH 自带的那份即可，例如：
 
@@ -175,7 +192,10 @@ $env:DSH_CK3WIKI_LIVE=1; node --test test/live.test.js
 |---|---|
 | 报「被反爬挑战页拦下」 | User-Agent 被改成了浏览器写法。改回带联系地址的机器人 UA，然后在插件页把关开一次 |
 | 报「响应不是合法的 JSON」 | 网络中间层替换了响应；开 `webFallback`（默认开）看 `ck3wiki_status` 的通道一栏 |
+| 报「响应被截断（truncated）」 | DSH web 兜底通道返回的响应过大被截断、无法当 JSON 用。减小 `limit` / `maxChars`，或稍后重试 |
 | 报 TLS 证书错误 | 本机加速器改了 hosts；保持 `trustSystemCa: auto` 或 `always` |
+| 输出里有「警告：…（该站未按参数过滤，请用数字 id）」 | 传给站点的命名空间 id 无效/写错，站点把过滤静默忽略了。用数字 id（或让插件解析名字：`namespace: "Template"`），`*` 表示全部 |
+| 报「无法识别命名空间「X」」 | 该名字不在站点 `siteinfo` 里。错误消息会列出全部可用名字与数字 id |
 | `section=N` 报越界 | 先 `ck3wiki_sections`，用返回的 `section=` 索引 |
 | 检索片段里有「Please help with verifying…」/ cookie 提示 | CirrusSearch 片段取自页面顶部，而该站页面顶部有版本提示模板与 cookie 横幅。插件已自动清洗（整句丢横幅、按词删 `Error creating thumbnail: File missing`）；词表在 `lib/html-text.js` 的 `DEFAULT_SNIPPET_SENTENCES` / `DEFAULT_SNIPPET_PHRASES` |
 | 页面顶部出现 `Load video` / `YouTube` / 「YouTube might collect personal data. Privacy Policy」 | 视频嵌入（`embedvideo` 扩展）的装饰层。插件已按 `embedvideo-consent` 定点过滤，**保留 `<figcaption>` 里的视频标题**；要是站方换了结构，用 `noisePatterns` 加一条即可，不必改代码 |

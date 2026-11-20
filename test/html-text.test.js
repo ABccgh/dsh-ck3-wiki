@@ -212,6 +212,37 @@ test('toText 对空/无正文输入返回空文本而不是抛错', () => {
   assert.equal(toText('<div class="mw-parser-output"></div>').text, '');
 });
 
+test('缩略图报错行（含裸 File missing）按行级噪声丢掉', () => {
+  const html = '<div class="mw-parser-output">'
+    + '<p>前文</p><p>Error creating thumbnail: File missing</p>'
+    + '<p>thumbnail: File missing</p><p>File missing</p><p>后文</p></div>';
+  const { text } = toText(html, { maxChars: 20_000 });
+  assert.ok(!text.includes('File missing'), text);
+  assert.ok(text.includes('前文') && text.includes('后文'), '只丢报错行，正文保留');
+  assert.ok(DEFAULT_NOISE_PATTERNS.some((pattern) => pattern.includes('File missing')), '默认噪声表应含缩略图报错');
+});
+
+test('truncateText / toText 的截断注记计入 maxChars，并按 scope 措辞', () => {
+  const long = Array.from({ length: 200 }, (_v, index) => `line ${index} ${'x'.repeat(40)}`).join('\n');
+  const page = truncateText(long, 500);
+  assert.equal(page.truncated, true);
+  assert.ok(page.text.length <= 500, `注记必须计入预算：${page.text.length}`);
+  assert.ok(page.text.includes('本页'), page.text);
+  assert.ok(page.text.includes('ck3wiki_sections'), page.text);
+
+  const section = truncateText(long, 500, { scope: 'section' });
+  assert.ok(section.text.length <= 500, `注记必须计入预算：${section.text.length}`);
+  assert.ok(section.text.includes('本节'), section.text);
+  assert.ok(!section.text.includes('本页'), section.text);
+
+  const viaToText = toText(`<div class="mw-parser-output"><p>${long.replace(/\n/g, ' ')}</p></div>`, {
+    maxChars: 400,
+    scope: 'section',
+  });
+  assert.equal(viaToText.truncated, true);
+  assert.ok(viaToText.text.length <= 400, `toText 返回总长 ${viaToText.text.length} 应 ≤ 400`);
+});
+
 test('truncateText 在行边界截断并附提示', () => {
   const long = Array.from({ length: 200 }, (_v, index) => `line ${index} ${'x'.repeat(40)}`).join('\n');
   const result = truncateText(long, 500);

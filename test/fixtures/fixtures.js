@@ -6,9 +6,26 @@
  * @module dsh-ck3-wiki/test/fixtures
  */
 
-/** `action=query&meta=siteinfo&siprop=general|statistics`。 */
-export const SITEINFO = {
+/** `action=query&meta=siteinfo&siprop=namespaces|namespacealiases`。 */
+export const NAMESPACES = {
   batchcomplete: true,
+  query: {
+    namespaces: {
+      0: { id: 0, case: 'first-letter', name: '', canonical: '' },
+      1: { id: 1, case: 'first-letter', name: 'Talk', canonical: 'Talk' },
+      2: { id: 2, case: 'first-letter', name: 'User', canonical: 'User' },
+      4: { id: 4, case: 'first-letter', name: 'CK3 Wiki', canonical: 'Project' },
+      6: { id: 6, case: 'first-letter', name: 'File', canonical: 'File' },
+      10: { id: 10, case: 'first-letter', name: 'Template', canonical: 'Template' },
+      14: { id: 14, case: 'first-letter', name: 'Category', canonical: 'Category' },
+      828: { id: 828, case: 'first-letter', name: 'Module', canonical: 'Module' },
+    },
+    namespacealiases: [{ id: 6, alias: 'Image' }],
+  },
+};
+
+/** `action=query&meta=siteinfo&siprop=general|statistics`。 */
+export const SITEINFO = {  batchcomplete: true,
   query: {
     general: {
       mainpage: 'Crusader Kings III Wiki',
@@ -84,8 +101,7 @@ export const SECTIONS = {
   },
 };
 
-/** `action=parse&prop=text|revid`：带版本横幅、编辑链接、脚注角标、列表与表格。 */
-export const PAGE_TEXT = {
+/** `action=parse&prop=text|revid`：带版本横幅、编辑链接、脚注角标、列表与表格。 */export const PAGE_TEXT = {
   parse: {
     title: 'Casus belli',
     pageid: 1871,
@@ -159,7 +175,17 @@ export const WIKITEXT = {
   },
 };
 
-/** `action=query&prop=info|pageprops|categories`（消歧义页 + 分类 + 重定向来源）。 */
+/** `action=parse&prop=wikitext|revid`（按节取源码）。 */
+export const PARSE_WIKITEXT = {
+  parse: {
+    title: 'Casus belli',
+    pageid: 1871,
+    revid: 36426,
+    wikitext: "== Uses ==\nA '''casus belli''' is a justification for war.\n",
+  },
+};
+
+/** `action=query&prop=info|revisions|categories`（修订元数据 + 分类 + 重定向来源）。 */
 export const PAGE_INFO = {
   batchcomplete: true,
   query: {
@@ -171,12 +197,21 @@ export const PAGE_INFO = {
         title: 'Casus belli',
         contentmodel: 'wikitext',
         pagelanguage: 'en',
-        touched: '2026-09-30T13:45:54Z',
+        // 不是内容最后编辑时间：插件不该把它当「最后编辑」显示。
+        touched: '2026-10-05T00:00:00Z',
         lastrevid: 36426,
         length: 12043,
         fullurl: 'https://ck3.paradoxwikis.com/Casus_belli',
         displaytitle: 'Casus belli',
-        pageprops: { disambiguation: '' },
+        revisions: [
+          {
+            revid: 36426,
+            parentid: 36000,
+            user: 'Kami-sama',
+            timestamp: '2026-09-30T13:45:54Z',
+            comment: '/* Uses */ add seize duchy',
+          },
+        ],
         categories: [
           { ns: 14, title: 'Category:1.20', timestamp: '2026-09-30T13:45:54Z' },
           { ns: 14, title: 'Category:War', timestamp: '2026-09-01T00:00:00Z' },
@@ -194,6 +229,7 @@ export const PAGE_INFO_MISSING = {
 
 /** `prop=links`。 */
 export const LINKS = {
+  continue: { plcontinue: 'War|0|0', continue: '||' },
   query: {
     pages: [
       {
@@ -210,22 +246,34 @@ export const LINKS = {
   },
 };
 
-/** `list=backlinks`。 */
+/** 不存在页面时的 `prop=links` 响应（带 missing 标记、没有 links）。 */
+export const LINKS_MISSING = {
+  query: { pages: [{ ns: 0, title: 'Nonexistent page xyzzy', missing: true }] },
+};
+
+/** `list=backlinks`（顺带 `prop=info`），带 continue 与一条经由重定向的反链。 */
 export const BACKLINKS = {
+  continue: { blcontinue: 'Traits|0', continue: '||' },
   query: {
+    pages: [{ pageid: 1871, ns: 0, title: 'Casus belli' }],
     backlinks: [
       { pageid: 140, ns: 0, title: 'Crusader Kings III Wiki' },
       { pageid: 168, ns: 0, title: 'Traits' },
       { pageid: 5, ns: 4, title: 'CK3 Wiki:Style', redirect: true },
     ],
-    continuation: {},
   },
 };
 
-/** `list=categorymembers`。 */
+/** 不存在标题时的 `list=backlinks` 响应（空列表 + prop=info 的 missing）。 */
+export const BACKLINKS_MISSING = {
+  query: { pages: [{ ns: 0, title: 'Nonexistent page xyzzy', missing: true }], backlinks: [] },
+};
+
+/** `list=categorymembers`（顺带 `prop=info`）。 */
 export const CATEGORY_MEMBERS = {
   continue: { cmcontinue: 'next|abc' },
   query: {
+    pages: [{ pageid: 500, ns: 14, title: 'Category:Modding' }],
     categorymembers: [
       { pageid: 1228, ns: 0, title: '3D models', timestamp: '2026-05-01T00:00:00Z', type: 'page' },
       { pageid: 5368, ns: 0, title: 'AI modding', timestamp: '2026-06-01T00:00:00Z', type: 'page' },
@@ -234,8 +282,14 @@ export const CATEGORY_MEMBERS = {
   },
 };
 
-/** `list=recentchanges`。 */
+/** 不存在分类页时的 `list=categorymembers` 响应（空列表 + missing）。 */
+export const CATEGORY_MISSING = {
+  query: { pages: [{ ns: 14, title: 'Category:Nothing', missing: true }], categorymembers: [] },
+};
+
+/** `list=recentchanges`（带 continue 与一条新建条目）。 */
 export const RECENT_CHANGES = {
+  continue: { rccontinue: '2026-09-30T22:10:00Z|36480', continue: '||' },
   query: {
     recentchanges: [
       {

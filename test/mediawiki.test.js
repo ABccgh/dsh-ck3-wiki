@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  alignToCacheWindow,
   apiUrl,
   backlinksUrl,
   categoryMembersUrl,
@@ -17,9 +18,11 @@ import {
   mapBacklinks,
   mapCategoryMembers,
   mapLinks,
+  mapNamespaces,
   mapOpenSearch,
   mapPageInfo,
   mapPageText,
+  mapParseWikitext,
   mapRecentChanges,
   mapSearch,
   mapSections,
@@ -29,8 +32,10 @@ import {
   normalizeApiPath,
   openSearchUrl,
   pageInfoUrl,
+  pageMissing,
   pageTextUrl,
   pageUrl,
+  parseWikitextUrl,
   recentChangesUrl,
   searchUrl,
   sectionsUrl,
@@ -42,10 +47,12 @@ import {
   BACKLINKS,
   CATEGORY_MEMBERS,
   LINKS,
+  NAMESPACES,
   OPENSEARCH,
   PAGE_INFO,
   PAGE_INFO_MISSING,
   PAGE_TEXT,
+  PARSE_WIKITEXT,
   RECENT_CHANGES,
   SEARCH,
   SECTIONS,
@@ -131,6 +138,8 @@ test('各端点 URL 带上正确的 action/list/prop', () => {
   const open = openSearchUrl(BASE, API, { query: 'casus', limit: 5 });
   assert.equal(param(open, 'action'), 'opensearch');
   assert.equal(param(open, 'search'), 'casus');
+  assert.equal(param(open, 'namespace'), '0', '默认在主条目里找');
+  assert.equal(param(openSearchUrl(BASE, API, { query: 'x', namespace: '10' }), 'namespace'), '10');
 
   const sections = sectionsUrl(BASE, API, 'Titles');
   assert.equal(param(sections, 'prop'), 'sections');
@@ -148,22 +157,51 @@ test('各端点 URL 带上正确的 action/list/prop', () => {
   assert.equal(param(wikitext, 'rvslots'), 'main');
   assert.equal(param(wikitext, 'redirects'), '1');
 
+  // 按节取源码必须走 action=parse：prop=revisions 不认 section。
+  const sectionSource = parseWikitextUrl(BASE, API, { title: 'Titles', section: 2 });
+  assert.equal(param(sectionSource, 'action'), 'parse');
+  assert.equal(param(sectionSource, 'page'), 'Titles');
+  assert.equal(param(sectionSource, 'prop'), 'wikitext|revid');
+  assert.equal(param(sectionSource, 'section'), '2');
+
   const info = pageInfoUrl(BASE, API, { title: 'Titles', categoryLimit: 50 });
-  assert.equal(param(info, 'prop'), 'info|pageprops|categories');
+  assert.equal(param(info, 'prop'), 'info|revisions|categories');
   assert.equal(param(info, 'inprop'), 'url|displaytitle');
+  assert.equal(param(info, 'rvprop'), 'timestamp|user|comment|ids', '最后编辑要走 revisions，不能只看 touched');
+  assert.equal(param(info, 'rvlimit'), '1');
 
   assert.equal(param(linksUrl(BASE, API, { title: 'Titles' }), 'prop'), 'links');
   assert.equal(param(backlinksUrl(BASE, API, { title: 'Titles' }), 'list'), 'backlinks');
+  assert.equal(param(backlinksUrl(BASE, API, { title: 'Titles' }), 'prop'), 'info', '反链要带 missing 探测');
 
   const category = categoryMembersUrl(BASE, API, { category: 'Modding', limit: 30, type: 'page' });
   assert.equal(param(category, 'list'), 'categorymembers');
   assert.equal(param(category, 'cmtitle'), 'Category:Modding');
   assert.equal(param(category, 'cmtype'), 'page');
+  assert.equal(param(category, 'prop'), 'info', '分类成员要带 missing 探测');
 
   const recent = recentChangesUrl(BASE, API, { limit: 20, days: 7, now: new Date('2026-10-01T00:00:00Z') });
   assert.equal(param(recent, 'list'), 'recentchanges');
   assert.equal(param(recent, 'rcstart'), '2026-10-01T00:00:00.000Z');
   assert.equal(param(recent, 'rcend'), '2026-09-24T00:00:00.000Z');
+});
+
+test('continue 原样透传成各自的游标参数', () => {
+  assert.equal(param(linksUrl(BASE, API, { title: 'T', continue: 'War|0|0' }), 'plcontinue'), 'War|0|0');
+  assert.equal(param(backlinksUrl(BASE, API, { title: 'T', continue: 'Traits|0' }), 'blcontinue'), 'Traits|0');
+  assert.equal(param(categoryMembersUrl(BASE, API, { category: 'M', continue: 'next|abc' }), 'cmcontinue'), 'next|abc');
+  assert.equal(param(recentChangesUrl(BASE, API, { continue: 'ts|1' }), 'rccontinue'), 'ts|1');
+});
+
+test('alignToCacheWindow 让 recent_changes 的 URL 在同一 TTL 窗口内稳定', () => {
+  const aligned = alignToCacheWindow(1_790_000_123_456, 60_000);
+  assert.equal(aligned.getTime() % 60_000, 0);
+  // 同一分钟内的两个时刻必须落到同一个窗口；跨窗口则不同。
+  assert.equal(alignToCacheWindow(1_790_000_120_000, 60_000).getTime(), alignToCacheWindow(1_790_000_150_000, 60_000).getTime());
+  assert.notEqual(alignToCacheWindow(1_790_000_120_000, 60_000).getTime(), alignToCacheWindow(1_790_000_190_000, 60_000).getTime());
+  // cacheTtlMs=0 时退回每分钟，仍然是稳定窗口。
+  assert.equal(alignToCacheWindow(1_790_000_123_456, 0).getTime() % 60_000, 0);
+  assert.equal(alignToCacheWindow(1_790_000_001_000, 0).getTime(), alignToCacheWindow(1_790_000_030_000, 0).getTime());
 });
 
 test('mapSiteInfo 取出站点与统计', () => {
@@ -230,19 +268,52 @@ test('mapWikitext 认得出不存在的页面', () => {
   assert.equal(mapped.content, '');
 });
 
-test('mapPageInfo 归一分类、消歧义与 URL', () => {
+test('mapPageInfo 归一修订元数据、分类与 URL（不碰 touched）', () => {
   const info = mapPageInfo(PAGE_INFO);
   assert.equal(info.found, true);
-  assert.equal(info.disambiguation, true);
   assert.equal(info.fullurl, 'https://ck3.paradoxwikis.com/Casus_belli');
   assert.deepEqual(info.categories, ['1.20', 'War']);
   assert.deepEqual(info.redirectFrom, ['Casus Belli']);
+  // 最后编辑来自 revisions，不是 touched。
+  assert.equal(info.revid, 36426);
+  assert.equal(info.timestamp, '2026-09-30T13:45:54Z');
+  assert.equal(info.user, 'Kami-sama');
+  assert.equal(info.comment, '/* Uses */ add seize duchy');
+  for (const dead of ['touched', 'pageprops', 'disambiguation', 'isRedirect', 'lastrevid']) {
+    assert.equal(Object.hasOwn(info, dead), false, `死字段 ${dead} 应已删除`);
+  }
 });
 
 test('mapPageInfo 对缺失页返回 found=false', () => {
   const info = mapPageInfo(PAGE_INFO_MISSING);
   assert.equal(info.found, false);
   assert.equal(info.missing, true);
+});
+
+test('mapParseWikitext 取按节源码与 revid', () => {
+  const mapped = mapParseWikitext(PARSE_WIKITEXT);
+  assert.equal(mapped.found, true);
+  assert.equal(mapped.title, 'Casus belli');
+  assert.equal(mapped.revid, 36426);
+  assert.ok(mapped.wikitext.includes("'''casus belli'''"));
+  assert.equal(mapParseWikitext({ parse: { title: 'X' } }).found, false);
+});
+
+test('mapNamespaces 认本地名、规范名与别名，并给出可列出的名字表', () => {
+  const mapped = mapNamespaces(NAMESPACES);
+  assert.equal(mapped.byName.get('template'), 10);
+  assert.equal(mapped.byName.get('ck3 wiki'), 4, '本地项目名要能解析');
+  assert.equal(mapped.byName.get('project'), 4, '规范名也要能解析');
+  assert.equal(mapped.byName.get('image'), 6, '别名要能解析');
+  assert.equal(mapped.byName.get('user talk'), undefined);
+  assert.ok(mapped.describe.some((line) => line.includes('Template')), mapped.describe.join('、'));
+  assert.equal(mapNamespaces({}).list.length, 0);
+});
+
+test('pageMissing 认出 prop=info 的 missing 标记', () => {
+  assert.equal(pageMissing({ query: { pages: [{ missing: true }] } }), true);
+  assert.equal(pageMissing({ query: { pages: [{ pageid: 1 }] } }), false);
+  assert.equal(pageMissing({}), false);
 });
 
 test('mapLinks / mapBacklinks 归一链接', () => {

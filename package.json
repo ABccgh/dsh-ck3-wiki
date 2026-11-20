@@ -1,16 +1,20 @@
 {
   "name": "@local/ck3wiki",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Crusader Kings III Wiki (MediaWiki) tools for DeepSeek Harness: read-only search and page access",
   "license": "MIT",
   "exports": {
     ".": "./lib/index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/**/*.js",
+    "locale/*.json",
+    "icon.svg",
     "cordis.patch.yml",
     "README.md"
   ],

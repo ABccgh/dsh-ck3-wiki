@@ -18,7 +18,7 @@
       config:
         wikiBaseUrl: https://ck3.paradoxwikis.com
         apiPath: /api.php
-        userAgent: 'dsh-ck3wiki/0.1 (+https://github.com/ABccgh/dsh-ck3-wiki; read-only)'
+        userAgent: 'dsh-ck3wiki/0.2.0 (+https://github.com/ABccgh/dsh-ck3-wiki; read-only)'
         requestTimeoutMs: 15000
         maxChars: 20000
         maxListedItems: 100
